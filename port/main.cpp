@@ -15,8 +15,10 @@
 #include "png_write.h"
 #include "present.h"
 #include "../runtime/spare.h"
+#include "../runtime/guest.h"
 #include "port.h"
 #include "../recomp-common/folders.h"
+#include "../recomp-common/proxy.h"
 #include "../recomp-common/settings.h"
 #include "../recomp-common/text.h"
 
@@ -29,6 +31,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <set>
 #include <thread>
@@ -82,8 +85,8 @@ bool Movie::Save(const std::string &path) const {
 }
 
 namespace {
-    constexpr uint32_t kStateVersion = 8; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy;
-                                          // 8: widescreen's camera a frame ago)
+    constexpr uint32_t kStateVersion = 9; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy;
+                                          // 8: widescreen's camera a frame ago; 9: a guest board's, runtime/guest.h)
 
     bool ReadFile(const std::string &path, std::vector<uint8_t> &data) {
         FILE *f = fopen(path.c_str(), "rb");
@@ -202,6 +205,14 @@ void RegisterPortFeatures() {
                                   "During an online match, how many frames each player's own controls are held back, at the bottom "
                                   "of the picture (\"DELAY 2\"): the host chooses it.",
                                   0});
+    // (display_vsync: Presenter::SetVsync, issue #185)
+    TheGame().features.push_back({"display_vsync", "Display", "VSync",
+                                  "Each picture shown when the screen refreshes, so the picture never tears. The game keeps the "
+                                  "board's pace (59.64 frames a second), so now and then a frame stays up for one more of the "
+                                  "screen's refreshes (on a 60 Hz screen, about every three seconds), and the controls can be a "
+                                  "frame later; on a screen slower than 60 Hz the game slows to it. Off: each picture shown as soon "
+                                  "as it's made.",
+                                  0});
     TheGame().features.push_back({"window_size", "Display", "Window size",
                                   "How large the window opens, in times the board's 224 lines (it can be made any size by "
                                   "dragging its edges; full screen is on the launcher's first page and F11).",
@@ -292,6 +303,31 @@ bool Port::Init(std::string &error) {
         if (!LoadRomSet(path, extra, extraRoms, extraError) && !LoadRomSet(path + ".zip", extra, extraRoms, extraError)) {
             error = std::string("the ROM set ") + GAME_EXTRA_SET + " is needed too: " + extraError;
             return false;
+        }
+    }
+#endif
+#ifdef GAME_GUEST_TABLE
+    // Boards of other games run beside this one (runtime/guest.h): each from --guest ID=PATH, or beside --rom (by the
+    // game's id, or its set's name). None is needed: without one, the game's sources leave out what they would show of it.
+    {
+        std::string folder = opt.romPath;
+        while (!folder.empty() && folder.back() == '/') {
+            folder.pop_back();
+        }
+        const size_t slash = folder.find_last_of('/');
+        folder = slash == std::string::npos ? "." : folder.substr(0, slash);
+        static const GuestGame kGuests[] = GAME_GUEST_TABLE;
+        for (const GuestGame &guest : kGuests) {
+            const auto given = opt.guestRomPaths.find(guest.id);
+            std::string guestError;
+            const bool loaded = given != opt.guestRomPaths.end()
+                                    ? LoadGuest(guest, given->second, guestError)
+                                    : LoadGuest(guest, folder + "/" + guest.id, guestError) || LoadGuest(guest, folder + "/" + guest.set, guestError);
+            if (loaded) {
+                fprintf(stderr, "%s: the set %s too (%s)\n", GAME_NAME, guest.set, guest.name);
+            } else {
+                fprintf(stderr, "%s: without %s (%s): %s\n", GAME_NAME, guest.set, guest.name, guestError.c_str());
+            }
         }
     }
 #endif
@@ -926,7 +962,10 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
     }
     // (what the camera's zoom was set to, for a few seconds: above that if both are said)
     if (*zoom.Label()) {
-        status(zoom.Label(), said * 14);
+        status(zoom.Label(), said++ * 14);
+    }
+    if (shotTicks > 0) {
+        status(shotSaid.c_str(), said * 14);
     }
     // (online: each player's name under their side's life bar, and under it a win streak of two or more)
     if (net && !connecting) {
@@ -1015,6 +1054,9 @@ bool Port::Windowed(std::vector<uint32_t> &pixels, Zoomed &zoomed) {
     } else if (speedTicks > 0) {
         speedTicks--;
     }
+    if (shotTicks > 0) {
+        shotTicks--;
+    }
     zoomed.keep.clear();
     if (!zoom.View(across, Video::kHeight, zoomed.view)) {
         Shown(pixels);
@@ -1042,10 +1084,44 @@ void Port::MenuPicture(std::vector<uint32_t> &pixels, uint32_t &width, uint32_t 
     }
 }
 
-std::string Port::StatePath(int slot) const {
+std::string Port::PlayerFolder() const {
     const size_t slash = opt.eepromPath.find_last_of('/');
-    const std::string folder = slash == std::string::npos ? "" : opt.eepromPath.substr(0, slash + 1);
-    return folder + "state" + std::to_string(slot) + ".bin";
+    return slash == std::string::npos ? "" : opt.eepromPath.substr(0, slash + 1);
+}
+
+std::string Port::StatePath(int slot) const {
+    return PlayerFolder() + "state" + std::to_string(slot) + ".bin";
+}
+
+bool Port::Screenshot() {
+    const std::string folder = PlayerFolder() + "screenshots/";
+    SDL_CreateDirectory(folder.c_str());
+    char stamp[32] = "";
+    const std::time_t now = std::time(nullptr);
+    if (const std::tm *local = std::localtime(&now)) {
+        std::strftime(stamp, sizeof(stamp), "%Y-%m-%d %H.%M.%S", local);
+    }
+    // (another in the same second: a number after it)
+    std::string name = std::string(GAME_ID " ") + stamp;
+    for (int n = 2; std::filesystem::exists(std::filesystem::u8path(folder + name + ".png")); n++) {
+        name = std::string(GAME_ID " ") + stamp + " " + std::to_string(n);
+    }
+    const int ticks = shotTicks;
+    shotTicks = 0; // (not the last one's line in this one)
+    std::vector<uint32_t> shown;
+    Shown(shown);
+    shotTicks = ticks;
+    const std::string path = folder + name + ".png";
+    if (!WritePng(path.c_str(), shown.data(), static_cast<uint32_t>(ShownWidth()), Video::kHeight)) {
+        fprintf(stderr, "screenshot: could not write %s\n", path.c_str());
+        shotSaid = "SCREENSHOT NOT SAVED";
+        shotTicks = kSpeedTicks;
+        return false;
+    }
+    fprintf(stderr, "screenshot: %s\n", path.c_str());
+    shotSaid = "SCREENSHOT SAVED  screenshots/" + name + ".png";
+    shotTicks = kSpeedTicks;
+    return true;
 }
 
 bool Port::SaveState(const std::string &path, std::string &error) {
@@ -1500,22 +1576,27 @@ static const char *const kExeSuffix = "";
 
 // The launcher's player name ([online] name in its launcher.ini: the collection's, or the game's own launcher's),
 // for a match hosted from the in-game menu
+std::filesystem::path LauncherFolder() {
+    const char *base = SDL_GetBasePath();
+    if (!base) {
+        return {};
+    }
+    std::error_code missing;
+    const bool collection = !std::filesystem::exists(std::string(base) + GAME_ID "-launcher" + kExeSuffix, missing);
+    const std::string name = recomp::FolderName(collection ? "CPS-2 Recomp" : GAME_NAME);  // (as the launcher names it)
+    std::filesystem::path folder = recomp::PortableFolder(base);
+    if (!folder.empty()) {
+        folder /= std::filesystem::u8path(name);
+    } else if (char *pref = SDL_GetPrefPath("", name.c_str())) {
+        folder = pref;
+        SDL_free(pref);
+    }
+    return folder;
+}
+
 namespace {
     std::string LauncherName() {
-        const char *base = SDL_GetBasePath();
-        if (!base) {
-            return "";
-        }
-        std::error_code missing;
-        const bool collection = !std::filesystem::exists(std::string(base) + GAME_ID "-launcher" + kExeSuffix, missing);
-        const char *name = collection ? "CPS-2 Recomp" : GAME_NAME;
-        std::filesystem::path folder = recomp::PortableFolder(base);
-        if (!folder.empty()) {
-            folder /= std::filesystem::u8path(name);
-        } else if (char *pref = SDL_GetPrefPath("", name)) {
-            folder = pref;
-            SDL_free(pref);
-        }
+        const std::filesystem::path folder = LauncherFolder();
         if (folder.empty()) {
             return "";
         }
@@ -2011,6 +2092,7 @@ void Usage() {
             "  --rom PATH             the ROM set (%s): a folder with its files, or its zip\n"
             "  --rom2 PATH            (a game that reads another set too) that set: a folder or zip (else\n"
             "                         beside --rom, by the set's name)\n"
+            "  --guest ID=PATH        (a game that runs other games' boards beside it) the set of game ID: the same\n"
             "  --eeprom FILE          where the board's settings memory is kept\n"
             "  --cpu MODE             native (translated code), blocks (the interpreter run the same way),\n"
             "                         interp (the interpreter, an instruction at a time), check\n"
@@ -2092,6 +2174,12 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.romPath = next();
         } else if (a == "--rom2") {
             o.extraRomPath = next();
+        } else if (a == "--guest") {
+            const std::string given = next();
+            const size_t equals = given.find('=');
+            if (equals != std::string::npos) {
+                o.guestRomPaths[given.substr(0, equals)] = given.substr(equals + 1);
+            }
         } else if (a == "--eeprom") {
             o.eepromPath = next();
         } else if (a == "--cpu") {
@@ -2302,11 +2390,11 @@ bool StartLauncher() {
     bool setUp = false;
     // (the launcher's own folder and file; the collection's keeps each game's file in a section of its own. In
     // portable mode the folder is in user/ beside the launcher, as the launcher has it: recomp-common/folders.h)
-    const char *name = collection ? "CPS-2 Recomp" : GAME_NAME;
+    const std::string name = recomp::FolderName(collection ? "CPS-2 Recomp" : GAME_NAME);  // (as the launcher names it)
     std::filesystem::path folder = recomp::PortableFolder(base);
     if (!folder.empty()) {
         folder /= std::filesystem::u8path(name);
-    } else if (char *pref = SDL_GetPrefPath("", name)) {
+    } else if (char *pref = SDL_GetPrefPath("", name.c_str())) {
         folder = pref;
         SDL_free(pref);
     }
@@ -2344,6 +2432,7 @@ int main(int argc, char **argv) {
         freopen("CONOUT$", "w", stdout);
         freopen("CONOUT$", "w", stderr);
     }
+    recomp::UseSystemProxy();  // (Windows' proxy, for the curl that asks the online service: recomp-common/proxy.h)
 #endif
 #ifdef __ANDROID__
     port::StartOnAndroid();

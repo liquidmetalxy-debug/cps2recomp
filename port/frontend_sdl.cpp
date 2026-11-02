@@ -11,6 +11,7 @@
 #include "touch.h"
 
 #include "../runtime/game.h"
+#include "../recomp-common/gamepads.h"
 
 #include <SDL3/SDL.h>
 
@@ -178,6 +179,14 @@ int RunWindowed(Port &port) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+    // (controllers SDL doesn't know, issue #213: gamecontrollerdb.txt beside the program, in the launcher's folder or in
+    // the game's own; recomp-common/gamepads.h)
+    {
+        const char *base = SDL_GetBasePath();
+        const std::string mine = port.PlayerFolder();
+        recomp::AddGamepadMappings({base ? std::filesystem::u8path(base) : std::filesystem::path(), LauncherFolder(),
+                                    mine.empty() ? std::filesystem::path() : std::filesystem::u8path(mine)});
+    }
     // (the window: so many times the board's 224 lines, --scale's or the Display page's)
     const int scale = port.opt.scale > 0 ? port.opt.scale : WindowSize();
     // (the window's name: game.cfg's "title" where a game has one, else its name)
@@ -260,6 +269,7 @@ int RunWindowed(Port &port) {
         }
         return presenter.Open(window, wantGpu, presentError);
     };
+    presenter.SetVsync(FeatureOn("display_vsync")); // (kept when it is opened again)
     if (!window || !openPresenter()) {
         fprintf(stderr, "SDL window: %s\n", window ? presentError.c_str() : SDL_GetError());
         return 1;
@@ -502,6 +512,8 @@ int RunWindowed(Port &port) {
                     port.Key('k', kKeyRestart);
                 } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_BACKSLASH && !ev.key.repeat) {
                     port.Key('k', kKeyExtra);
+                } else if (ev.key.scancode == SDL_SCANCODE_F12 && !ev.key.repeat) {
+                    port.Screenshot();
                 } else if (ev.key.scancode == SDL_SCANCODE_F2 && !ev.key.repeat &&
                            (!port.net || (port.net->Hosting() && FeatureOn("online_test_menu")))) {
                     port.test = !port.test; // the operator's test switch
@@ -732,6 +744,7 @@ int RunWindowed(Port &port) {
             }
         }
         followShader();
+        presenter.SetVsync(FeatureOn("display_vsync")); // (the Display page's VSync, as changed in the menu)
         if (port.quit) {
             break;
         }

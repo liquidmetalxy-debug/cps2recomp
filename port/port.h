@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
@@ -25,6 +26,7 @@ namespace port {
 struct Options {
     std::string romPath = "rom";
     std::string extraRomPath;  // --rom2: the extra set (game.cfg's extra_set), if the game has one (default: beside --rom)
+    std::map<std::string, std::string> guestRomPaths; // --guest ID=PATH: the sets of the games game.cfg's guests names (default: beside --rom)
     std::string eepromPath;    // the board's settings memory (created when missing)
     std::string moviePlay;     // input movie to replay
     std::string movieRecord;   // input movie to write
@@ -143,6 +145,11 @@ struct Port {
     static constexpr int kSpeedTicks = 150; // (two and a half seconds)
     Menu::Rate saidRate{1, 1};
     int speedTicks = 0;
+    // F12 (issue #31): the picture as shown, readout and all (not the zoom's), saved as a PNG in the player's folder's
+    // screenshots/; where it went is said at the bottom for a while
+    bool Screenshot();
+    std::string shotSaid;
+    int shotTicks = 0;
     // One tick; true if the game ran (so that there is a new picture and sound)
     bool Tick();
     // The keys that work while playing: 'p' stops and starts, 'o' goes on by a frame, '-' and '=' change the
@@ -175,6 +182,7 @@ struct Port {
         return machine->PictureWidth();
     }
     std::string StatePath(int slot) const;
+    std::string PlayerFolder() const; // (the one settings.ini and the saves are in, with a slash; "" if none)
 
     bool Init(std::string &error);
     // The custom soundtrack (soundtrack.h): its files, played while the port's custom_soundtrack feature is on
@@ -268,6 +276,8 @@ int RunWindowed(Port &port);
 bool InCollection();
 // The optional features as the launcher lists them (--list-features)
 std::string LauncherFeatureList();
+// The launcher's own folder (launcher.ini's), the collection's or the game's; empty if there is none
+std::filesystem::path LauncherFolder();
 #ifdef __ANDROID__
 // Android (port/android.cpp): the game's folder and log, which its activity says, before anything else
 void StartOnAndroid();

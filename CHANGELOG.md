@@ -6,6 +6,49 @@
   synchronized through input delay and rollback; the joining player cannot toggle it. Both players need the
   updated build (protocol 7). Enable **Online test menu** before hosting; it is off by default, including in Pure
   mode. Offline F2 is unchanged.
+- **Vampire Savior Definitive's Donovan, Phobos and Pyron work again** (#230): since 1.0.0 the downloads gave them
+  another character's moves (Victor's, for Donovan) and the game started over a few moves into the fight. The build
+  made its map of Vampire Savior 2's code once, on a fresh tree's first pass, before the game's code had been found, and
+  never again; it is now made again whenever the game's entries grow, and the release build stops if it is old.
+- **Updating on Android from inside the app** (#211): the update card's **Update** downloads the new version's APK,
+  checks it against the release's `SHA256SUMS.txt`, and opens Android's installer, which asks you to confirm and
+  installs it over the app: settings, saves and ROM sets stay. The first time, Android's Settings open for you to allow
+  CPS-2 Recomp to install apps (`REQUEST_INSTALL_PACKAGES`); come back and the installer opens. **Install** opens the
+  installer again if you said not now (recomp-common #52).
+- **The first Darkstalkers' stages in Vampire Savior Definitive**: with Darkstalkers' set (`dstlk`) too, its twelve
+  stages and their music, shown as that game shows them (its board runs unseen beside Definitive's, its camera where
+  Definitive's is, the fighters drawn over it). An option puts each match on the opponent's Darkstalkers stage, where
+  it has one; training and the stage viewer have them by name. **Street Fighter Alpha 2's eighteen** too, with its set
+  (`sfa2u`), by name. The toolkit runs other games' boards beside a game's (`game.cfg`'s `guests`, `runtime/guest.h`,
+  `--guest ID=PATH`), and shows their stages behind its fighters (`fight/guest_stages.h`): each other game is described
+  once, by its port's facts (`games/<id>/guest.h`).
+- **The Punisher**, set `punisheru` (USA 930422): the second CPS-1 game, a beat-'em-up for two players (the Punisher
+  and Nick Fury), with what Cadillacs and Dinosaurs has: free play (the board's own), a stage to start at, attract
+  mode, score attack, the stage and model viewers, the cheats, the Board page and the music's names. The toolkit's
+  CPS-1 board now reads program files that come in pairs of bytes, and gives the ID the CPS-B chip has, which this
+  game checks as it starts.
+- **Darkstalkers: The Night Warriors** (#215), set `dstlk` (Europe 940705): the first Darkstalkers game, built from
+  Night Warriors' sources (its program is the one Night Warriors was made from), with everything Night Warriors has:
+  training mode, the alternative modes, the colour editor, widescreen, the zoom, Huitzil and Pyron at a switch, the
+  Board page and the music's names.
+- **Night Warriors: Darkstalkers' Revenge** (#215), set `nwarr` (Europe 950316): the second Darkstalkers game, with its
+  own sources (its program is not Vampire Savior's). Training mode, attract mode, the stage and model viewers, the
+  colour editor, survival, endless battle and ring out, widescreen with invisible walls, the camera zoom, Huitzil and
+  Pyron at a switch, the Board page and the music's names.
+- **VSync** (#185): a Display option (off unless chosen) that shows each picture at the screen's refresh, so it never
+  tears. The game keeps the board's pace, so now and then a frame stays up one refresh longer.
+- **Screenshots** (#31): F12 saves the picture as shown (readouts included, without the zoom) to `screenshots/` in the
+  game's folder, and says so at the bottom of the screen.
+- **More controllers** (#213): a controller SDL doesn't know as a gamepad, such as an arcade panel that isn't an
+  XInput one, can be given its mapping in a `gamecontrollerdb.txt` (SDL_GameControllerDB's file) beside the programs
+  or in the launcher's folder; the launcher and the games read it when they start (recomp-common #50).
+- **X-Men: Children of the Atom starts on Windows** (#212): its folder for settings and saves was named after the game,
+  and Windows takes no colon in a folder's name, so the game never started (error 267). On Windows the folder is now
+  *X-Men - Children of the Atom*; elsewhere nothing changes (recomp-common #49).
+- **Online play behind a proxy on Windows** (#194): the launcher and the games now use the proxy set in Windows' proxy
+  settings (where Clash, v2rayN and the like put theirs) to reach the online service and the updates, unless
+  HTTPS_PROXY or HTTP_PROXY is set already (recomp-common #49). The matches themselves still go straight between the
+  two games.
 - **Android says when a new version is out** (#209): the launcher checks the releases as on the other systems, and a
   newer one gets the update card (and the Games row's dot) with **Download**, which opens the release's APK: open
   the download and Android installs it over the app, your settings, saves and ROM sets kept (recomp-common #45).

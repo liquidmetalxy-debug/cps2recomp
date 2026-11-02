@@ -7,6 +7,10 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+
+#include "../dstlk/guest.h"
+#include "../sfa2/guest.h"
 #include <cstdint>
 
 #include "game.h"
@@ -47,6 +51,22 @@ inline constexpr const char *kStageNames[] = {
     "Feast of the Damned", "Concrete Cave", "Tower of Arrogance", "Red Thirst", "Deserted Chateau", "Abaraya",
     "Vanity Paradise", "War Agony", "Forever Torment", "Green Scream", "Iron Horse, Iron Terror", "Fetus of God",
 };
+
+// Other games' stages, shown after these (fight/guest_stages.h; src/stages.cpp: their boards run beside this one), in
+// the lists a stage is chosen from by name (training's, the stage viewer's): the first Darkstalkers' (each character's,
+// in that game's order), then Street Fighter Alpha 2's (game.cfg's guests, in the same order)
+template <size_t A, size_t B>
+constexpr std::array<const char *, A + B> Joined(const std::array<const char *, A> &a, const std::array<const char *, B> &b) {
+    std::array<const char *, A + B> out{};
+    for (size_t i = 0; i < A; i++) {
+        out[i] = a[i];
+    }
+    for (size_t i = 0; i < B; i++) {
+        out[A + i] = b[i];
+    }
+    return out;
+}
+inline constexpr auto kMoreStageNames = Joined(dstlk_guest::kStageNames, sfa2_guest::kStageNames);
 
 // The frame's lists of objects to draw that the objects of kind 12 have, one for each depth (src/picture.cpp)
 inline constexpr int kTwelveLists = 7;
